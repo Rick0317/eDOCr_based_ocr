@@ -1,0 +1,14 @@
+ID,type,flag,nominal,value,tolerance,upper_bound,lower_bound
+1,Length,False,a1,a1,general,,
+2,Length,False,B1,B1,general,,
+3,Length,False,5.DD,5.DD,general,,
+4,Length,False,46.DD,46.DD,general,,
+5,Length,True,18.DD±D.1,18.DD,,+D.1,-D.1
+6,Length,False,56.DD,56.DD,general,,
+7,Length,False,1-⌀1.50,1-⌀1.50,general,,
+8,Length,False,14.DD,14.DD,general,,
+9,Length,False,25.DD,25.DD,general,,
+10,Length,False,616.DD,616.DD,general,,
+11,Length,False,14.25,14.25,general,,
+12,Length,True,9,9,general,,
+13,Length,False,2-⌀2.5D,2-⌀2.5D,general,,

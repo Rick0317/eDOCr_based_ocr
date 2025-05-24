@@ -1,0 +1,9 @@
+ID,type,flag,nominal,value,tolerance,upper_bound,lower_bound
+1,Length,False,H1,,H1,,
+2,Length,False,B1,B1,general,,
+3,Length,False,4-C2,4-C2,general,,
+4,Length,False,156,156,general,,
+5,Length,False,60,60,general,,
+6,Length,True,4-C),4-C),general,,
+7,Length,False,15D,15D,general,,
+8,Length,True,2n..,2n..,general,,

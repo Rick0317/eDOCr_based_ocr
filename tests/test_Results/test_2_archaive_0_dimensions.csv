@@ -1,0 +1,13 @@
+ID,type,flag,nominal,value,tolerance,upper_bound,lower_bound
+1,Length,False,x1,x1,general,,
+2,Length,False,x2,x2,general,,
+3,Length,False,119.0,119.0,general,,
+4,Length,True,±1,,,+1,-1
+5,Length,True,C±85,C,,+85,-85
+6,Length,False,x2,x2,general,,
+7,Length,True,±-2,,,+-2,--2
+8,Length,True,C±95,C,,+95,-95
+9,Length,False,110.5,110.5,general,,
+10,Length,False,79.6,79.6,general,,
+11,Length,False,51.5,51.5,general,,
+12,Length,True,C±4.5 ±188,C±4.5 ±188,general,,

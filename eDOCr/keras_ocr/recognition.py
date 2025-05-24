@@ -274,13 +274,17 @@ def build_model(
         )
         locnet_y = keras.layers.Flatten()(locnet_y)
         locnet_y = keras.layers.Dense(64, activation="relu")(locnet_y)
+        
+        # Create initializers for the localization layer
+        kernel_initializer = keras.initializers.Constant(np.zeros((64, 6), dtype="float32"))
+        bias_initializer = keras.initializers.Constant(np.array([[1, 0, 0], [0, 1, 0]], dtype="float32").flatten())
+        
         locnet_y = keras.layers.Dense(
             6,
-            weights=[
-                np.zeros((64, 6), dtype="float32"),
-                np.array([[1, 0, 0], [0, 1, 0]], dtype="float32").flatten(),
-            ],
+            kernel_initializer=kernel_initializer,
+            bias_initializer=bias_initializer
         )(locnet_y)
+        
         localization_net = keras.models.Model(inputs=stn_input_layer, outputs=locnet_y)
         x = keras.layers.Lambda(_transform, output_shape=stn_input_output_shape)(
             [x, localization_net(x)]

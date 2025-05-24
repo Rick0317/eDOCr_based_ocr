@@ -5,6 +5,7 @@ import typing
 import hashlib
 import urllib.request
 import urllib.parse
+import ssl
 
 import cv2
 import imgaug
@@ -523,6 +524,16 @@ def download_and_verify(url, sha256=None, cache_dir=None, verbose=True, filename
     if not os.path.isfile(filepath) or (sha256 and sha256sum(filepath) != sha256):
         if verbose:
             print("Downloading " + filepath)
+        
+        # Create SSL context to handle certificate verification issues on macOS
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        
+        # Create opener with SSL context
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context))
+        urllib.request.install_opener(opener)
+        
         urllib.request.urlretrieve(url, filepath)
     assert sha256 is None or sha256 == sha256sum(
         filepath

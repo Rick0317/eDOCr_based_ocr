@@ -45,6 +45,12 @@ class Pipeline:
         max_height, max_width = np.array(
             [image.shape[:2] for image, scale in images]
         ).max(axis=0)
+        
+        # Ensure max dimensions are divisible by 96 for compatibility with VGG+dilated convolution
+        # (96 = 6 * 16, where 6 is dilation rate and 16 = 2^4 for 4 pooling operations)
+        max_height = max_height + (96 - (max_height % 96)) % 96
+        max_width = max_width + (96 - (max_width % 96)) % 96
+        
         scales = [scale for _, scale in images]
         images = np.array(
             [
@@ -69,50 +75,60 @@ class Pipeline:
         i=0
         recognition_kwargs={}
         for box in box_groups:
-            rect=cv2.minAreaRect(box)
-            alfa=get_alfa(box) 
-            if -5<alfa<85:
-                angle=-round(alfa/5)*5
-            elif 85<alfa<95:
-                angle=round(alfa/5)*5-180
-            elif 95<alfa<185:
-                angle=180-round(alfa/5)*5
-            else:
-                angle=alfa
-            w=int(max(rect[1])+5)
-            h=int(min(rect[1])+2)
-            img_croped = subimage(img, rect[0],angle,w,h)  
-            img_croped,thresh=clean_h_lines(img_croped)
-            cnts = cv2.findContours(thresh,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0] #Get contourns
-            
-            if len(cnts)==1:
-                #pred=self.recognizer.recognize(image=cv2.rotate(img_croped,cv2.ROTATE_90_COUNTERCLOCKWISE))
-                img_croped=cv2.rotate(img_croped,cv2.ROTATE_90_COUNTERCLOCKWISE)
-                box_groups=[np.array([[[0,0],[h,0],[h,w],[0,w]]])]
-                pred=self.recognizer.recognize_from_boxes(images=[img_croped],box_groups=box_groups,**recognition_kwargs)[0][0]
-                pred,add=analyse_pred(pred,cnts)
-            elif 1<len(cnts)<15:
-                arr=check_tolerances(img_croped)
-                pred=''
-                for img_ in arr:
-                    h,w,_=img_.shape
-                    box_groups=[np.array([[[0,0],[w,0],[w,h],[0,h]]])]
-                    pred_ = self.recognizer.recognize_from_boxes(images=[img_],box_groups=box_groups,**recognition_kwargs)[0][0]
-                    if pred_=='':
-                        pred=self.recognizer.recognize(image=img_croped)+' '
-                        break
-                    else:
-                        pred+=pred_+' '
-                pred=pred[:-1]
-                pred,add=analyse_pred(pred,cnts)
-            else:
-                add=False
+            try:
+                rect=cv2.minAreaRect(box)
+                alfa=get_alfa(box) 
+                if -5<alfa<85:
+                    angle=-round(alfa/5)*5
+                elif 85<alfa<95:
+                    angle=round(alfa/5)*5-180
+                elif 95<alfa<185:
+                    angle=180-round(alfa/5)*5
+                else:
+                    angle=alfa
+                w=int(max(rect[1])+5)
+                h=int(min(rect[1])+2)
+                
+                # Skip if dimensions are too small or invalid
+                if w <= 0 or h <= 0 or w > img.shape[1] * 2 or h > img.shape[0] * 2:
+                    continue
+                    
+                img_croped = subimage(img, rect[0],angle,w,h)  
+                img_croped,thresh=clean_h_lines(img_croped)
+                
+                cnts = cv2.findContours(thresh,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0] #Get contourns
+                
+                if len(cnts)==1:
+                    #pred=self.recognizer.recognize(image=cv2.rotate(img_croped,cv2.ROTATE_90_COUNTERCLOCKWISE))
+                    img_croped=cv2.rotate(img_croped,cv2.ROTATE_90_COUNTERCLOCKWISE)
+                    box_groups=[np.array([[[0,0],[h,0],[h,w],[0,w]]])]
+                    pred=self.recognizer.recognize_from_boxes(images=[img_croped],box_groups=box_groups,**recognition_kwargs)[0][0]
+                    pred,add=analyse_pred(pred,cnts)
+                elif 1<len(cnts)<15:
+                    arr=check_tolerances(img_croped)
+                    pred=''
+                    for img_ in arr:
+                        h,w,_=img_.shape
+                        box_groups=[np.array([[[0,0],[w,0],[w,h],[0,h]]])]
+                        pred_ = self.recognizer.recognize_from_boxes(images=[img_],box_groups=box_groups,**recognition_kwargs)[0][0]
+                        if pred_=='':
+                            pred=self.recognizer.recognize(image=img_croped)+' '
+                            break
+                        else:
+                            pred+=pred_+' '
+                    pred=pred[:-1]
+                    pred,add=analyse_pred(pred,cnts)
+                else:
+                    add=False
 
-            if add:
-                i+=1
-                pred_id={'ID':i}
-                pred_id.update(pred)
-                predictions.append({'pred':pred_id,'box':box})
+                if add:
+                    i+=1
+                    pred_id={'ID':i}
+                    pred_id.update(pred)
+                    predictions.append({'pred':pred_id,'box':box})
+            except Exception as e:
+                print(f"Warning: Skipping box due to error: {e}")
+                continue
         return predictions
 
 ############################################################################
@@ -148,13 +164,35 @@ def subimage(image, center, theta, width, height):
    matrix = cv2.getRotationMatrix2D( center=center, angle=theta, scale=1 )
    image = cv2.warpAffine( src=image, M=matrix, dsize=shape )
    x,y = (int( center[0] - width/2  ),int( center[1] - height/2 ))
-   image = image[ y:y+height, x:x+width ]
+   
+   # Ensure crop coordinates are within image bounds
+   x = max(0, x)
+   y = max(0, y)
+   x_end = min(image.shape[1], x + width)
+   y_end = min(image.shape[0], y + height)
+   
+   # Check if the crop area is valid
+   if x >= x_end or y >= y_end:
+       # Return a small dummy image if crop area is invalid
+       return np.zeros((10, 10, 3), dtype=np.uint8)
+   
+   image = image[ y:y_end, x:x_end ]
    return image
 
 def clean_h_lines(img_croped):
+    # Check if image is empty or too small
+    if img_croped is None or img_croped.size == 0 or img_croped.shape[0] < 1 or img_croped.shape[1] < 1:
+        # Return a small dummy image and empty threshold
+        dummy_img = np.zeros((10, 10, 3), dtype=np.uint8)
+        dummy_thresh = np.zeros((10, 10), dtype=np.uint8)
+        return dummy_img, dummy_thresh
+    
     gray = cv2.cvtColor(img_croped, cv2.COLOR_BGR2GRAY) #Convert img to grayscale
     _,thresh = cv2.threshold(gray,127,255,cv2.THRESH_BINARY_INV) #Threshold to binary image
-    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(img_croped.shape[1]),1))
+    
+    # Check if image is wide enough for horizontal kernel
+    kernel_width = max(1, int(img_croped.shape[1]))
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_width,1))
     detect_horizontal = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, horizontal_kernel, iterations=2)
     cnts = cv2.findContours(detect_horizontal, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = cnts[0] if len(cnts) == 2 else cnts[1]

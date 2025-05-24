@@ -34,6 +34,49 @@ from . import tools
 def compute_input(image):
     # should be RGB order
     image = image.astype("float32")
+    
+    # Handle both single images and batches
+    if len(image.shape) == 4:  # Batch of images (batch_size, height, width, channels)
+        batch_size = image.shape[0]
+        processed_images = []
+        
+        for i in range(batch_size):
+            single_image = image[i]
+            # Ensure dimensions are divisible by 96 for compatibility with VGG+dilated convolution
+            # (96 = 6 * 16, where 6 is dilation rate and 16 = 2^4 for 4 pooling operations)
+            height, width = single_image.shape[:2]
+            
+            # Calculate padding needed to make dimensions divisible by 96
+            pad_height = (96 - (height % 96)) % 96
+            pad_width = (96 - (width % 96)) % 96
+            
+            # Apply padding if needed
+            if pad_height > 0 or pad_width > 0:
+                if len(single_image.shape) == 3:
+                    single_image = np.pad(single_image, ((0, pad_height), (0, pad_width), (0, 0)), 'constant', constant_values=0)
+                else:
+                    single_image = np.pad(single_image, ((0, pad_height), (0, pad_width)), 'constant', constant_values=0)
+            
+            processed_images.append(single_image)
+        
+        # Stack back into batch
+        image = np.stack(processed_images, axis=0)
+    
+    else:  # Single image (height, width, channels) or (height, width)
+        # Ensure dimensions are divisible by 96 for compatibility with VGG+dilated convolution
+        height, width = image.shape[:2]
+        
+        # Calculate padding needed to make dimensions divisible by 96
+        pad_height = (96 - (height % 96)) % 96
+        pad_width = (96 - (width % 96)) % 96
+        
+        # Apply padding if needed
+        if pad_height > 0 or pad_width > 0:
+            if len(image.shape) == 3:
+                image = np.pad(image, ((0, pad_height), (0, pad_width), (0, 0)), 'constant', constant_values=0)
+            else:
+                image = np.pad(image, ((0, pad_height), (0, pad_width)), 'constant', constant_values=0)
+    
     mean = np.array([0.485, 0.456, 0.406])
     variance = np.array([0.229, 0.224, 0.225])
 
@@ -774,9 +817,78 @@ class Detector:
                 Therein lies the balance.
             size_threshold: The minimum area for a word.
         """
-        images = [compute_input(tools.read(image)) for image in images]
+        # Handle case where images is already a numpy array (from Pipeline)
+        if isinstance(images, np.ndarray):
+            # Images are already processed by Pipeline, just apply compute_input normalization
+            processed_images = []
+            for i in range(images.shape[0]):
+                img = images[i]
+                processed_img = compute_input(img)
+                processed_images.append(processed_img)
+            images_array = np.array(processed_images)
+        else:
+            # Original path: read and process images individually
+            processed_images = []
+            for image in images:
+                # Check if it's already a numpy array or a file path
+                if isinstance(image, np.ndarray):
+                    img = image
+                else:
+                    img = tools.read(image)
+                processed_img = compute_input(img)
+                processed_images.append(processed_img)
+            
+            # Find the maximum dimensions to ensure all images have the same size
+            max_height = max(img.shape[0] for img in processed_images)
+            max_width = max(img.shape[1] for img in processed_images)
+            
+            # Ensure max dimensions are divisible by 96
+            max_height = max_height + (96 - (max_height % 96)) % 96
+            max_width = max_width + (96 - (max_width % 96)) % 96
+            
+            # Pad all images to the same maximum dimensions
+            standardized_images = []
+            for img in processed_images:
+                height_pad = max_height - img.shape[0]
+                width_pad = max_width - img.shape[1]
+                
+                if height_pad > 0 or width_pad > 0:
+                    if len(img.shape) == 3:
+                        padded_img = np.pad(img, ((0, height_pad), (0, width_pad), (0, 0)), 'constant', constant_values=0)
+                    else:
+                        padded_img = np.pad(img, ((0, height_pad), (0, width_pad)), 'constant', constant_values=0)
+                else:
+                    padded_img = img
+                
+                standardized_images.append(padded_img)
+            
+            # Now all images have the same dimensions, safe to convert to numpy array
+            images_array = np.array(standardized_images)
+        
+        # Final safety check: ensure all dimensions are divisible by 96
+        print(f"DEBUG: images_array shape before final check: {images_array.shape}")
+        batch_size, height, width = images_array.shape[:3]
+        
+        # Check if dimensions need adjustment
+        height_pad = (96 - (height % 96)) % 96
+        width_pad = (96 - (width % 96)) % 96
+        
+        if height_pad > 0 or width_pad > 0:
+            print(f"DEBUG: Final padding needed - height_pad: {height_pad}, width_pad: {width_pad}")
+            print(f"DEBUG: Original dimensions: {height}x{width}")
+            
+            # Apply final padding to ensure divisibility by 96
+            if len(images_array.shape) == 4:  # batch of color images
+                images_array = np.pad(images_array, ((0, 0), (0, height_pad), (0, width_pad), (0, 0)), 'constant', constant_values=0)
+            else:  # batch of grayscale images
+                images_array = np.pad(images_array, ((0, 0), (0, height_pad), (0, width_pad)), 'constant', constant_values=0)
+            
+            print(f"DEBUG: Final dimensions after padding: {images_array.shape}")
+        else:
+            print(f"DEBUG: No final padding needed, dimensions: {height}x{width}")
+        
         boxes = getBoxes(
-            self.model.predict(np.array(images), **kwargs),
+            self.model.predict(images_array, **kwargs),
             detection_threshold=detection_threshold,
             text_threshold=text_threshold,
             link_threshold=link_threshold,
